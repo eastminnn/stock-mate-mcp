@@ -4,6 +4,15 @@ import yfinance as yf
 # 서버 초기화
 mcp = FastMCP("StockMate")
 
+def get_usd_krw_rate():
+    """실시간 USD/KRW 환율을 가져오는 헬퍼 함수"""
+    try:
+        data = yf.Ticker("USDKRW=X").history(period="1d")
+        if data.empty: return 1350.0
+        return data['Close'].iloc[-1]
+    except:
+        return 1350.0
+    
 @mcp.tool()
 def get_stock_report(symbol: str) -> str:
     """특정 종목의 현재가와 등락 정보를 조회합니다. (미국 주식 원화 환산 및 보합 처리)"""
@@ -36,7 +45,7 @@ def get_stock_report(symbol: str) -> str:
             display_price = price * rate
             currency_note = f" (실시간 환율 {rate:,.2f}원 적용)"
 
-        return (f"[[ StockMate 실시간 시황 ]]\n\n"
+        return (f"[ StockMate 실시간 시황 ]\n\n"
                 f"📌 종목: {symbol}\n"
                 f"💰 현재가: {display_price:,.0f}{currency_label}\n"
                 f"📈 등락률: {direction} {change:+.2f}%\n"
@@ -58,7 +67,7 @@ def get_exchange_rate() -> str:
     }
     
     try:
-        report = ["[[ 💱 주요 국가 실시간 환율 ]]\n"]
+        report = ["[ 💰 주요 국가 실시간 환율 ]\n"]
         
         for name, symbol in pairs.items():
             ticker = yf.Ticker(symbol)
@@ -82,33 +91,6 @@ def get_exchange_rate() -> str:
         return f"⚠️ 환율 브리핑 중 오류 발생: {str(e)}"
     
 @mcp.tool()
-def get_stock_news(symbol: str) -> str:
-    """해당 종목의 최신 주요 뉴스를 조회합니다."""
-    try:
-        ticker = yf.Ticker(symbol)
-        # 1. news가 None이거나 비어있는지 먼저 체크
-        news_data = getattr(ticker, 'news', []) 
-        
-        if not news_data:
-            return f"📰 {symbol} 관련 최신 뉴스가 현재 없습니다. (야후 파이낸스 데이터 지연)"
-            
-        # 2. 안전한 리스트 슬라이싱
-        news_list = news_data[:3]
-        
-        report = [f"[[ 📰 {symbol} 최신 주요 뉴스 ]]\n"]
-        for news in news_list:
-            # 3. get() 메서드로 필드 존재 여부 확인
-            title = news.get('title', '제목 없음')
-            link = news.get('link', '#')
-            publisher = news.get('publisher', '정보원 미상')
-            report.append(f"🔹 {title}\n🏢 출처: {publisher}\n🔗 {link}\n")
-            
-        return "\n".join(report)
-    except Exception as e:
-        # 4. 정확한 에러 원인 파악을 위해 로그 남기기 권장
-        return f"⚠️ 뉴스 조회 중 오류 발생: {str(e)}"
-    
-@mcp.tool()
 def analyze_investment_card(current_price: float, buy_price: float, quantity: int = 1) -> str:
     """매수가 대비 수익률을 계산하여 상세 카드 리포트 형태로 반환합니다."""
     profit = (current_price - buy_price) * quantity
@@ -116,7 +98,7 @@ def analyze_investment_card(current_price: float, buy_price: float, quantity: in
     status = "🔥 수익 중" if roi > 0 else "🧊 손실 중"
     if roi == 0: status = "➖ 보합 상태"
 
-    return (f"[[ 📊 투자 수익률 분석 보고서 ]]\n\n"
+    return (f"[ 📊 투자 수익률 분석 보고서 ]\n\n"
             f"✅ 분석 결과: {status}\n"
             f"--------------------------\n"
             f"🔹 매수단가: {buy_price:,.0f}원\n"
