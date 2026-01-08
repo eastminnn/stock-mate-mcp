@@ -6,74 +6,106 @@ mcp = FastMCP("StockMate")
 
 @mcp.tool()
 def get_stock_report(symbol: str) -> str:
-    """
-    특정 종목의 현재가와 전일 대비 등락 정보를 조회합니다.
-    :param symbol: 종목코드 (예: 삼성전자는 '005930.KS', 애플은 'AAPL')
-    """
+    """특정 종목의 현재가와 등락 정보를 조회합니다. (미국 주식 원화 환산 및 보합 처리)"""
     try:
         ticker = yf.Ticker(symbol)
-        df = ticker.history(period="2d")
-        if df.empty: return f"❌ '{symbol}' 종목을 찾을 수 없습니다."
+        df = ticker.history(period="5d")
+        if df.empty or len(df) < 2: 
+            return f"❌ '{symbol}' 종목의 데이터를 찾을 수 없습니다."
 
         price = df['Close'].iloc[-1]
-        # 수익률 공식: $$ROI = \frac{Current - Previous}{Previous} \times 100$$
-        change = ((price - df['Close'].iloc[-2]) / df['Close'].iloc[-2]) * 100
-        direction = "🔺" if change > 0 else "🔻"
+        prev_price = df['Close'].iloc[-2]
+        change = ((price - prev_price) / prev_price) * 100
 
-        # 카카오톡 최적화 포맷
+        # 보합(0%) 상태를 포함한 등락 아이콘 처리
+        if change > 0:
+            direction = "🔺"
+        elif change < 0:
+            direction = "🔻"
+        else:
+            direction = "➖" # 변동 없음
+
+        # 미국 주식일 경우 원화로 표시
+        is_us_stock = not (symbol.endswith(".KS") or symbol.endswith(".KQ"))
+        display_price = price
+        currency_label = "원"
+        currency_note = ""
+
+        if is_us_stock:
+            rate = get_usd_krw_rate()
+            display_price = price * rate
+            currency_note = f" (실시간 환율 {rate:,.2f}원 적용)"
+
         return (f"[[ StockMate 실시간 시황 ]]\n\n"
                 f"📌 종목: {symbol}\n"
-                f"💰 현재가: {price:,.2f}원\n"
+                f"💰 현재가: {display_price:,.0f}{currency_label}\n"
                 f"📈 등락률: {direction} {change:+.2f}%\n"
+                f"{currency_note}\n"
                 f"--------------------------\n"
-                f"💡 '수익률 분석해줘'라고 말하면\n"
-                f"내 투자 성적을 바로 계산해드려요!")
+                f"💡 '나챗방으로 보내줘'라고 말해보세요!")
     except Exception as e:
         return f"⚠️ 시황 조회 중 오류 발생: {str(e)}"
     
 @mcp.tool()
-def get_exchange_rate(from_currency: str = "USD", to_currency: str = "KRW") -> str:
-    """
-    실시간 환율 정보를 조회합니다. (예: USD/KRW, USDT/USD 등)
-    :param from_currency: 기준 통화 (기본값 USD)
-    :param to_currency: 대상 통화 (기본값 KRW)
-    """
+def get_exchange_rate() -> str:
+    """주요 국가(미국, 일본, 유럽, 중국)의 실시간 환율 정보를 브리핑합니다."""
+    # 조회할 주요 환율 리스트
+    pairs = {
+        "미국 (USD)": "USDKRW=X",
+        "일본 (JPY)": "JPYKRW=X",
+        "유럽 (EUR)": "EURKRW=X",
+        "중국 (CNY)": "CNYKRW=X"
+    }
+    
     try:
-        pair = f"{from_currency}{to_currency}=X"
-        ticker = yf.Ticker(pair)
-        data = ticker.history(period="1d")
-        if data.empty:
-            return f"❌ {from_currency}/{to_currency} 환율 정보를 가져올 수 없습니다."
-            
-        rate = data['Close'].iloc[-1]
-        return (f"[[ 💱 실시간 환율 정보 ]]\n\n"
-                f"💵 {from_currency} 1 = {rate:,.2f} {to_currency}\n"
-                f"--------------------------\n"
-                f"*(yfinance 실시간 데이터 기준)*")
+        report = ["[[ 💱 주요 국가 실시간 환율 ]]\n"]
+        
+        for name, symbol in pairs.items():
+            ticker = yf.Ticker(symbol)
+            data = ticker.history(period="1d")
+            if not data.empty:
+                rate = data['Close'].iloc[-1]
+                # 일본 엔화는 보통 100엔 단위이므로 별도 처리
+                if "JPY" in symbol:
+                    report.append(f"🇯🇵 {name}: {rate:,.2f}원 (100엔 기준)")
+                elif "USD" in symbol:
+                    report.append(f"🇺🇸 {name}: {rate:,.2f}원")
+                elif "EUR" in symbol:
+                    report.append(f"🇪🇺 {name}: {rate:,.2f}원")
+                elif "CNY" in symbol:
+                    report.append(f"🇨🇳 {name}: {rate:,.2f}원")
+        
+        report.append("\n--------------------------")
+        report.append("*(yfinance 실시간 데이터 기준)*")
+        return "\n".join(report)
     except Exception as e:
-        return f"⚠️ 환율 조회 중 오류 발생: {str(e)}"
-
+        return f"⚠️ 환율 브리핑 중 오류 발생: {str(e)}"
+    
 @mcp.tool()
 def get_stock_news(symbol: str) -> str:
-    """
-    해당 종목의 최신 주요 뉴스 3건을 요약하여 제공합니다.
-    :param symbol: 종목코드 (예: 'AAPL', '005930.KS')
-    """
+    """해당 종목의 최신 주요 뉴스를 조회합니다."""
     try:
         ticker = yf.Ticker(symbol)
-        news_list = ticker.news[:3] # 24k 응답 제한 준수를 위해 3건으로 제한
+        # 1. news가 None이거나 비어있는지 먼저 체크
+        news_data = getattr(ticker, 'news', []) 
         
-        if not news_list:
-            return f"📰 {symbol} 관련 최신 뉴스가 없습니다."
+        if not news_data:
+            return f"📰 {symbol} 관련 최신 뉴스가 현재 없습니다. (야후 파이낸스 데이터 지연)"
             
+        # 2. 안전한 리스트 슬라이싱
+        news_list = news_data[:3]
+        
         report = [f"[[ 📰 {symbol} 최신 주요 뉴스 ]]\n"]
         for news in news_list:
-            title = news.get('title')
-            link = news.get('link')
-            report.append(f"🔹 {title}\n🔗 {link}\n")
+            # 3. get() 메서드로 필드 존재 여부 확인
+            title = news.get('title', '제목 없음')
+            link = news.get('link', '#')
+            publisher = news.get('publisher', '정보원 미상')
+            report.append(f"🔹 {title}\n🏢 출처: {publisher}\n🔗 {link}\n")
             
         return "\n".join(report)
     except Exception as e:
+        # 4. 정확한 에러 원인 파악을 위해 로그 남기기 권장
         return f"⚠️ 뉴스 조회 중 오류 발생: {str(e)}"
     
 @mcp.tool()
@@ -82,8 +114,8 @@ def analyze_investment_card(current_price: float, buy_price: float, quantity: in
     profit = (current_price - buy_price) * quantity
     roi = ((current_price - buy_price) / buy_price) * 100
     status = "🔥 수익 중" if roi > 0 else "🧊 손실 중"
+    if roi == 0: status = "➖ 보합 상태"
 
-    # 알림톡 스타일의 시각화 레이아웃
     return (f"[[ 📊 투자 수익률 분석 보고서 ]]\n\n"
             f"✅ 분석 결과: {status}\n"
             f"--------------------------\n"
