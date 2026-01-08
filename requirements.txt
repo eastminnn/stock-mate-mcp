@@ -1,0 +1,5 @@
+fastmcp>=0.4.1
+yfinance
+mcp[cli]>=1.8.0
+pandas
+lxml
